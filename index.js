@@ -44,12 +44,23 @@ async function run() {
     });
   };
 
+  const verifyAdmin = async (req, res, next) => {
+    const email = req.decoded.email;
+    const query = { email: email };
+    const user = await usersCollection.findOne(query);
+    const isAdmin = user.role === "admin";
+    if (!isAdmin) {
+      res.status(401).send({ message: "Unauthorized Access" });
+    }
+    next();
+  };
+
   try {
     app.get("/", (req, res) => {
       res.send("GoFast courier data is coming");
     });
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
 
     app.post("/jwt", (req, res) => {
       const user = req.body;
@@ -60,8 +71,84 @@ async function run() {
       res.send({ token });
     });
 
+    // user related api
+    app.post("/user", async (req, res) => {
+      const user = req.body;
+      const query = { email: user?.email };
+      const existingUser = await usersCollection.findOne(query);
+      if (existingUser) {
+        return res.send({ message: "users already exists" });
+      }
+      // console.log("user", user);
+      const result = await usersCollection.insertOne(user);
+      res.send(result);
+    });
+
+    // user related api
+
+    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
+      const result = await usersCollection.find().toArray();
+      res.send(result);
+    });
+
+    app.get("/user/admin/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+      if (req.decoded.email !== email) {
+        res.send({ isAdmin: false });
+      }
+      const query = { email: email };
+      const user = await usersCollection.findOne(query);
+      const result = { admin: user.role === "admin" };
+      res.send(result);
+    });
+
+    app.get("/user/:email", async (req, res) => {
+      const email = req.params.email;
+      const query = { email: email };
+      const result = await usersCollection.findOne(query);
+      res.send(result);
+    });
+
+    app.patch("/updateProfile", verifyToken, async (req, res) => {
+      const query = req.query;
+      console.log(query);
+      const profile = req.body;
+      const filter = { email: query.email };
+      const options = { upsert: true };
+      const updatedDoc = {
+        $set: {
+          ...(profile.name && { name: profile.name }), // Set name if profile.name exists
+          ...(profile.image && { image: profile.image }), // Set image if profile.image exists
+        },
+      };
+      const result = await usersCollection.updateOne(
+        filter,
+        updatedDoc,
+        options
+      );
+      res.send(result);
+
+      // console.log(profile);
+    });
+
     app.get("/topRider", async (req, res) => {
       const result = await topRiderCollection.find().toArray();
+      res.send(result);
+    });
+
+    app.patch("/assignRider", verifyToken, verifyAdmin, async (req, res) => {
+      const rider = req.body;
+      const parcelId = rider.parcelId;
+      const query = { _id: new ObjectId(parcelId) };
+      const options = { upsert: true };
+      const updatedDoc = {
+        $set: {
+          riderId: rider.riderId,
+          status: "On The Way",
+        },
+      };
+      // console.log(rider);
+      const result = await bookingCollection.updateOne(query, updatedDoc);
       res.send(result);
     });
 
@@ -105,7 +192,7 @@ async function run() {
           collectionAmount: parcel.collectionAmount,
           receiverAddress: parcel.receiverAddress,
           parcelCost: parcel.parcelCost,
-          status: "pending",
+          // status: "pending",
           date: parcel.date,
         },
       };
@@ -119,15 +206,8 @@ async function run() {
       res.send(result);
     });
 
-    app.post("/user", async (req, res) => {
-      const user = req.body;
-      const query = { email: user.email };
-      const existingUser = await usersCollection.findOne(query);
-      if (existingUser) {
-        return res.send({ message: "users already exists" });
-      }
-      // console.log("user", user);
-      const result = await usersCollection.insertOne(user);
+    app.get("/parcels", verifyToken, verifyAdmin, async (req, res) => {
+      const result = await bookingCollection.find().toArray();
       res.send(result);
     });
   } finally {
